@@ -1,1 +1,0 @@
-import{_ as e}from"./NoteCreateView.vue_vue_type_script_setup_true_lang-DqDDUlrb.js";import{d as o,l as t,o as a}from"./index-BUKs6C5I.js";const m=o({__name:"NoteDetailView",setup(r){return(_,n)=>(a(),t(e))}});export{m as default};
