@@ -41,8 +41,8 @@ function categoryById(id: number) {
   return categories.items.value.find((c) => c.id === id) || null
 }
 
-async function onComplete(id: string) {
-  await tasks.complete(id)
+async function onToggle(id: string) {
+  await tasks.toggle(id)
 }
 </script>
 
@@ -85,7 +85,7 @@ async function onComplete(id: string) {
         :key="t.id"
         :task="t"
         :category="categoryById(t.category_id)"
-        @complete="onComplete"
+        @toggle="onToggle"
       />
     </div>
   </div>

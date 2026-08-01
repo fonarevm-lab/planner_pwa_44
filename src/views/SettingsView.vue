@@ -1,15 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getSetting, setSetting, getAllTasks, getAllNotes, deleteTask, deleteNote } from '../db'
+import {
+  getSetting,
+  setSetting,
+  getAllTasks,
+  getAllNotes,
+  deleteTask,
+  deleteNote,
+  putTask,
+  putNote,
+  type Task,
+  type Note,
+} from '../db'
 import {
   isFileSystemAccessSupported,
+  isShareSupported,
   pickBackupFolder,
   getSavedFolder,
   forgetFolder,
   saveBackup,
   getLastAutoBackupDate,
   markAutoBackupDone,
-  shouldRunAutoBackup,
+  downloadBackup,
+  shareBackup,
+  parseBackupFile,
   type BackupPayload,
 } from '../fs-backup'
 
@@ -19,13 +33,17 @@ const reminderOffset = ref(15)
 const saved = ref(false)
 
 const folderSupported = ref(false)
+const shareSupported = ref(false)
 const folderSet = ref(false)
 const lastAutoDate = ref<string | null>(null)
 const backupMessage = ref<string | null>(null)
 const backupBusy = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
 
 onMounted(async () => {
   folderSupported.value = isFileSystemAccessSupported()
+  shareSupported.value = isShareSupported()
   if (folderSupported.value) {
     const h = await getSavedFolder()
     folderSet.value = !!h
@@ -92,6 +110,86 @@ async function backupNow() {
   }
 }
 
+async function backupToFile() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  backupMessage.value = null
+  try {
+    const tasks = await getAllTasks()
+    const notes = await getAllNotes()
+    const payload: BackupPayload = {
+      tasks,
+      notes,
+      exported_at: new Date().toISOString(),
+      app_version: '0.2.0',
+    }
+    if (shareSupported.value) {
+      const result = await shareBackup(payload)
+      if (result === 'shared') {
+        backupMessage.value = '✅ Бэкап отправлен в выбранное приложение'
+      } else if (result === 'downloaded') {
+        const fileName = `planner-backup-${new Date().toISOString().replace(/[:T]/g, '').slice(0, 15)}.json`
+        backupMessage.value = `✅ Скачан файл ${fileName}`
+      } else {
+        backupMessage.value = null
+      }
+    } else {
+      const fileName = await downloadBackup(payload)
+      backupMessage.value = `✅ Скачан: ${fileName}`
+    }
+  } catch (e: any) {
+    backupMessage.value = '❌ ' + (e?.message || 'Ошибка бэкапа')
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+function triggerImport() {
+  if (importing.value) return
+  fileInput.value?.click()
+}
+
+async function onFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // сброс чтобы можно было выбрать тот же файл повторно
+  if (!file) return
+
+  importing.value = true
+  backupMessage.value = null
+  try {
+    const payload = await parseBackupFile(file)
+    if (!payload) {
+      backupMessage.value = '❌ Файл не похож на бэкап Planner'
+      return
+    }
+    const ok = confirm(
+      `Восстановить из бэкапа?\n\n` +
+      `Будет импортировано: ${payload.tasks.length} задач, ${payload.notes.length} заметок.\n\n` +
+      `⚠️ Все текущие данные будут УДАЛЕНЫ и заменены на данные из файла.\n` +
+      `Рекомендую сначала сделать бэкап текущих данных.`
+    )
+    if (!ok) return
+
+    // Удаляем текущие
+    const existingTasks = await getAllTasks()
+    for (const t of existingTasks) await deleteTask(t.id)
+    const existingNotes = await getAllNotes()
+    for (const n of existingNotes) await deleteNote(n.id)
+
+    // Заливаем из файла
+    for (const t of payload.tasks as Task[]) await putTask(t)
+    for (const n of payload.notes as Note[]) await putNote(n)
+
+    backupMessage.value = `✅ Восстановлено: ${payload.tasks.length} задач, ${payload.notes.length} заметок. Перезагружаю…`
+    setTimeout(() => location.reload(), 1500)
+  } catch (e: any) {
+    backupMessage.value = '❌ ' + (e?.message || 'Ошибка импорта')
+  } finally {
+    importing.value = false
+  }
+}
+
 async function exportAll() {
   const tasks = await getAllTasks()
   const notes = await getAllNotes()
@@ -121,44 +219,62 @@ async function clearAll() {
 
     <!-- BACKUP -->
     <section class="card space-y-3">
-      <h2 class="font-semibold">📁 Бэкап в папку Android</h2>
+      <h2 class="font-semibold">💾 Бэкап и восстановление</h2>
+      <p class="text-sm text-fg-muted">
+        <span v-if="shareSupported">На телефоне откроется системное меню «Поделиться» — выбери Google Drive, Telegram или «Сохранить в Files».</span>
+        <span v-else>Скачивает JSON-файл с твоими задачами и заметками.</span>
+      </p>
 
-      <div v-if="!folderSupported" class="text-sm text-amber-300 bg-amber-500/10 rounded-lg p-3">
-        ⚠️ Твой браузер не поддерживает File System Access API. Открой PWA в <b>Chrome</b>.
-      </div>
+      <button class="btn-primary w-full" :disabled="backupBusy" @click="backupToFile">
+        {{ backupBusy ? '⏳ Сохраняю…' : (shareSupported ? '📤 Сохранить бэкап' : '💾 Скачать бэкап (JSON)') }}
+      </button>
 
-      <div v-else>
-        <div class="flex items-center gap-2 text-sm">
-          <span class="w-2 h-2 rounded-full" :class="folderSet ? 'bg-emerald-400' : 'bg-fg-muted/40'"></span>
-          <span v-if="folderSet" class="text-fg-muted">Папка настроена. Бэкапы: <b>Planner/</b></span>
-          <span v-else class="text-fg-muted">Не настроено</span>
-        </div>
-
-        <div class="text-xs text-fg-muted space-y-0.5">
-          <p>⏰ Авто-бэкап: ежедневно после 6:00</p>
-          <p v-if="lastAutoDate">📅 Последний: <b>{{ lastAutoDate }}</b></p>
-          <p v-else>📅 Последний: ещё не было</p>
-        </div>
-
-        <div class="flex gap-2">
-          <button class="btn-primary flex-1" :disabled="backupBusy" @click="chooseFolder">
-            {{ folderSet ? '📁 Сменить папку' : '📁 Выбрать папку' }}
-          </button>
-          <button class="btn-ghost" :disabled="backupBusy || !folderSet" @click="backupNow">
-            {{ backupBusy ? '⏳' : '💾' }}
-          </button>
-        </div>
-
-        <button
-          v-if="folderSet"
-          class="text-xs text-fg-muted hover:text-red-400 underline"
-          @click="forgetFolderClick"
-        >Забыть папку</button>
-      </div>
+      <button class="btn-ghost w-full" :disabled="importing" @click="triggerImport">
+        {{ importing ? '⏳ Импортирую…' : '📥 Восстановить из файла' }}
+      </button>
+      <input
+        ref="fileInput"
+        type="file"
+        accept="application/json,.json"
+        class="hidden"
+        @change="onFileSelected"
+      />
 
       <p v-if="backupMessage" class="text-sm" :class="backupMessage.startsWith('❌') ? 'text-red-300' : 'text-emerald-400'">
         {{ backupMessage }}
       </p>
+    </section>
+
+    <!-- DESKTOP AUTO-BACKUP (только если поддерживается) -->
+    <section v-if="folderSupported" class="card space-y-3">
+      <h2 class="font-semibold text-sm">📁 Авто-бэкап в папку <span class="text-fg-muted text-xs">(десктоп)</span></h2>
+
+      <div class="flex items-center gap-2 text-sm">
+        <span class="w-2 h-2 rounded-full" :class="folderSet ? 'bg-emerald-400' : 'bg-fg-muted/40'"></span>
+        <span v-if="folderSet" class="text-fg-muted">Папка настроена. Бэкапы: <b>Planner/</b></span>
+        <span v-else class="text-fg-muted">Не настроено</span>
+      </div>
+
+      <div class="text-xs text-fg-muted space-y-0.5">
+        <p>⏰ Авто-бэкап: ежедневно после 6:00</p>
+        <p v-if="lastAutoDate">📅 Последний: <b>{{ lastAutoDate }}</b></p>
+        <p v-else>📅 Последний: ещё не было</p>
+      </div>
+
+      <div class="flex gap-2">
+        <button class="btn-ghost flex-1 text-sm" :disabled="backupBusy" @click="chooseFolder">
+          {{ folderSet ? '📁 Сменить папку' : '📁 Выбрать папку' }}
+        </button>
+        <button class="btn-ghost" :disabled="backupBusy || !folderSet" @click="backupNow">
+          {{ backupBusy ? '⏳' : '💾' }}
+        </button>
+      </div>
+
+      <button
+        v-if="folderSet"
+        class="text-xs text-fg-muted hover:text-red-400 underline"
+        @click="forgetFolderClick"
+      >Забыть папку</button>
     </section>
 
     <!-- AI -->
@@ -193,8 +309,7 @@ async function clearAll() {
 
     <!-- DANGER -->
     <section class="card space-y-3 mt-6">
-      <h2 class="font-semibold">💾 Экспорт и очистка</h2>
-      <button class="btn-ghost w-full" @click="exportAll">📤 Скачать все данные (JSON)</button>
+      <h2 class="font-semibold">⚠️ Очистка</h2>
       <button class="btn-danger w-full !bg-red-900/30 !text-red-300" @click="clearAll">🗑 Удалить все данные</button>
     </section>
 

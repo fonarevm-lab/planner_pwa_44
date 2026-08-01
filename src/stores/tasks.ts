@@ -37,8 +37,12 @@ export function useTasksStore() {
       const t = await getTask(id)
       if (!t) return null
       const updated = { ...t, ...patch, updated_at: new Date().toISOString() }
-      if (patch.status === 'done' && !updated.completed_at) {
-        updated.completed_at = new Date().toISOString()
+      if (patch.status === 'done') {
+        // ставим completed_at только при первом переходе в done
+        if (!updated.completed_at) updated.completed_at = new Date().toISOString()
+      } else if (patch.status === 'pending' || patch.status === 'in_progress') {
+        // возврат в активные — чистим метку выполнения
+        updated.completed_at = undefined
       }
       await putTask(updated)
       const idx = _state.items.value.findIndex((x) => x.id === id)
@@ -47,6 +51,14 @@ export function useTasksStore() {
     },
     async complete(id: string) {
       return this.update(id, { status: 'done' })
+    },
+    async uncomplete(id: string) {
+      return this.update(id, { status: 'pending' })
+    },
+    async toggle(id: string) {
+      const t = await getTask(id)
+      if (!t) return null
+      return this.update(id, { status: t.status === 'done' ? 'pending' : 'done' })
     },
     async remove(id: string) {
       await deleteTask(id)

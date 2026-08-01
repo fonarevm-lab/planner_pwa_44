@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { onMounted, ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, reactive, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '../stores/tasks'
 import { useCategoriesStore } from '../stores/categories'
+import { getTask, type Task } from '../db'
 import { openInCalendar } from '../calendar'
 
 const router = useRouter()
+const route = useRoute()
 const tasks = useTasksStore()
 const categories = useCategoriesStore()
+
+const editing = ref<Task | null>(null)
+const loadingTask = ref(false)
 
 const form = reactive({
   title: '',
@@ -29,8 +34,26 @@ const error = ref<string | null>(null)
 const showCalendar = ref(false)
 const calendarTime = ref('15:00')
 
+const isEdit = computed(() => !!editing.value)
+const editId = computed(() => route.params.id as string | undefined)
+
 onMounted(async () => {
   await categories.load()
+  if (editId.value) {
+    loadingTask.value = true
+    const t = await getTask(editId.value)
+    if (t) {
+      editing.value = t
+      form.title = t.title
+      form.description = t.description || ''
+      form.category_id = t.category_id
+      form.priority = t.priority
+      form.planned_date = t.planned_date
+    } else {
+      error.value = 'Задача не найдена'
+    }
+    loadingTask.value = false
+  }
 })
 
 async function save() {
@@ -41,19 +64,37 @@ async function save() {
   saving.value = true
   error.value = null
   try {
-    const t = await tasks.create({
-      title: form.title.trim(),
-      description: form.description || undefined,
-      category_id: form.category_id,
-      priority: form.priority,
-      planned_date: form.planned_date,
-    })
-    router.replace(`/tasks/${t.id}`)
+    if (editing.value) {
+      await tasks.update(editing.value.id, {
+        title: form.title.trim(),
+        description: form.description || undefined,
+        category_id: form.category_id,
+        priority: form.priority,
+        planned_date: form.planned_date,
+      })
+      router.replace(`/tasks/${editing.value.id}`)
+    } else {
+      const t = await tasks.create({
+        title: form.title.trim(),
+        description: form.description || undefined,
+        category_id: form.category_id,
+        priority: form.priority,
+        planned_date: form.planned_date,
+      })
+      router.replace(`/tasks/${t.id}`)
+    }
   } catch (e: any) {
     error.value = e?.message || 'Ошибка сохранения'
   } finally {
     saving.value = false
   }
+}
+
+async function remove() {
+  if (!editing.value) return
+  if (!confirm('Удалить задачу?')) return
+  await tasks.remove(editing.value.id)
+  router.replace('/')
 }
 
 function openCalendarNow() {
@@ -77,7 +118,7 @@ function openCalendarNow() {
   <div class="space-y-4">
     <header class="flex items-center justify-between">
       <button class="btn-ghost !px-3" @click="router.back()">←</button>
-      <h1 class="text-xl font-semibold">Новая задача</h1>
+      <h1 class="text-xl font-semibold">{{ isEdit ? 'Редактирование' : 'Новая задача' }}</h1>
       <button class="btn-primary !px-4" :disabled="saving" @click="save">
         {{ saving ? '...' : 'Сохранить' }}
       </button>
@@ -153,5 +194,9 @@ function openCalendarNow() {
 
       <div v-if="error" class="card border border-red-500/30 text-red-300 text-sm">{{ error }}</div>
     </form>
+
+    <div v-if="isEdit" class="pt-4">
+      <button type="button" class="btn-danger w-full" @click="remove">🗑 Удалить задачу</button>
+    </div>
   </div>
 </template>

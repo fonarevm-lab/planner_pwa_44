@@ -106,6 +106,96 @@ export async function getLastAutoBackupDate(): Promise<string | null> {
 }
 
 /**
+ * Поддерживается ли Web Share API для файлов (мобильный Chrome, Safari).
+ */
+export function isShareSupported(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const data: any = { files: [new File([''], 'x', { type: 'application/json' })] }
+  return !!(navigator.canShare && navigator.canShare(data))
+}
+
+/**
+ * Скачивает бэкап как JSON-файл. Работает везде (десктоп + мобильный).
+ * Возвращает имя сгенерированного файла.
+ */
+export async function downloadBackup(payload: BackupPayload): Promise<string> {
+  const json = JSON.stringify(payload, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const fileName = `planner-backup-${formatTimestamp(new Date())}.json`
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+  return fileName
+}
+
+/**
+ * Шэрит бэкап через системный share-sheet (мобильный) или скачивает (десктоп).
+ * Идеально для сохранения в Google Drive / OneDrive / отправки в Telegram.
+ */
+export async function shareBackup(
+  payload: BackupPayload
+): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  const json = JSON.stringify(payload, null, 2)
+  const fileName = `planner-backup-${formatTimestamp(new Date())}.json`
+  const file = new File([json], fileName, { type: 'application/json' })
+
+  if (isShareSupported()) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: 'Planner Backup',
+        text: 'Бэкап Planner PWA',
+      })
+      return 'shared'
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return 'cancelled'
+      // иначе — падаем в download
+    }
+  }
+
+  await downloadBackup(payload)
+  return 'downloaded'
+}
+
+/**
+ * Читает файл бэкапа и парсит JSON. Возвращает payload или null если файл невалидный.
+ */
+export async function parseBackupFile(file: File): Promise<BackupPayload | null> {
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    if (!data || typeof data !== 'object') throw new Error('Не JSON')
+    if (!Array.isArray(data.tasks) || !Array.isArray(data.notes)) {
+      throw new Error('Нет полей tasks/notes')
+    }
+    return data as BackupPayload
+  } catch (e) {
+    console.error('parseBackupFile error:', e)
+    return null
+  }
+}
+
+/**
+ * Собирает текущие задачи+заметки в payload. Удобно дёргать из UI.
+ */
+export async function buildBackupPayload(
+  tasks: unknown[],
+  notes: unknown[]
+): Promise<BackupPayload> {
+  return {
+    tasks,
+    notes,
+    exported_at: new Date().toISOString(),
+    app_version: '0.2.0',
+  }
+}
+
+/**
  * Нужно ли делать авто-бэкап сейчас?
  * Возвращает true если сегодня ещё не делали и время >= 6:00.
  */

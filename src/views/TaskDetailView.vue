@@ -29,6 +29,16 @@ async function complete() {
   task.value = await tasks.complete(task.value.id)
 }
 
+async function uncomplete() {
+  if (!task.value) return
+  task.value = await tasks.uncomplete(task.value.id)
+}
+
+function edit() {
+  if (!task.value) return
+  router.push(`/tasks/${task.value.id}/edit`)
+}
+
 async function remove() {
   if (!task.value) return
   if (!confirm('Удалить задачу?')) return
@@ -56,8 +66,10 @@ function openCalendar() {
     <header class="flex items-center justify-between">
       <button class="btn-ghost !px-3" @click="router.back()">←</button>
       <div class="flex gap-2">
-        <button v-if="task.status !== 'done'" class="btn-primary !py-1.5 !px-3 text-sm" @click="complete">✓ Сделано</button>
-        <button class="btn-ghost !py-1.5 !px-3 text-sm" @click="openCalendar">📅 В календарь</button>
+        <button v-if="task.status === 'done'" class="btn-ghost !py-1.5 !px-3 text-sm" @click="uncomplete">↩ В работу</button>
+        <button v-else class="btn-primary !py-1.5 !px-3 text-sm" @click="complete">✓ Сделано</button>
+        <button class="btn-ghost !py-1.5 !px-3 text-sm" @click="edit" title="Редактировать задачу">✏️</button>
+        <button class="btn-ghost !py-1.5 !px-3 text-sm" @click="openCalendar">📅</button>
         <button class="btn-danger !py-1.5 !px-3 text-sm" @click="remove">🗑</button>
       </div>
     </header>

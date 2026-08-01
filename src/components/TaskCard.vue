@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router'
 import type { Task, Category } from '../db'
 
 const props = defineProps<{ task: Task; category: Category | null }>()
-const emit = defineEmits<{ complete: [id: string] }>()
+const emit = defineEmits<{ toggle: [id: string] }>()
 const router = useRouter()
 
 function open() { router.push(`/tasks/${props.task.id}`) }
@@ -14,8 +14,9 @@ function open() { router.push(`/tasks/${props.task.id}`) }
     <button
       class="mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors"
       :class="task.status === 'done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-fg-muted/40 hover:border-accent'"
-      @click.stop="emit('complete', task.id)"
-      :aria-label="task.status === 'done' ? 'Выполнено' : 'Отметить выполненным'"
+      @click.stop="emit('toggle', task.id)"
+      :title="task.status === 'done' ? 'Снять отметку (вернуть в работу)' : 'Отметить выполненным'"
+      :aria-label="task.status === 'done' ? 'Снять отметку выполнения' : 'Отметить выполненным'"
     >
       <span v-if="task.status === 'done'">✓</span>
     </button>

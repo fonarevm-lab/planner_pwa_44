@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/notes/new', name: 'note-new', component: () => import('./views/NoteCreateView.vue') },
     { path: '/notes/:id', name: 'note-detail', component: () => import('./views/NoteDetailView.vue'), props: true },
     { path: '/tasks/new', name: 'task-new', component: () => import('./views/TaskCreateView.vue') },
+    { path: '/tasks/:id/edit', name: 'task-edit', component: () => import('./views/TaskCreateView.vue') },
     { path: '/tasks/:id', name: 'task-detail', component: () => import('./views/TaskDetailView.vue'), props: true },
     { path: '/assistant', name: 'assistant', component: () => import('./views/AssistantView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
